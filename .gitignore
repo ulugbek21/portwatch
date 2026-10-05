@@ -1,0 +1,17 @@
+# Binaries
+/portwatch
+/dist/
+*.exe
+*.test
+*.out
+
+# IDE
+.vscode/
+.idea/
+
+# Env
+.env
+.env.local
+
+# OS
+.DS_Store
