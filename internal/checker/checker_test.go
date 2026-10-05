@@ -13,7 +13,7 @@ func TestCheckTCP_Open(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	res := CheckTCP(ln.Addr().String(), time.Second)
 
