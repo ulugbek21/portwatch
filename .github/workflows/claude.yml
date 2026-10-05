@@ -36,6 +36,10 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
+          # Allow Claude's own bot to invoke this workflow (e.g. so a comment
+          # from claude-code-review that mentions @claude can trigger follow-up).
+          allowed_bots: "claude[bot]"
+
           # This is an optional setting that allows Claude to read CI results on PRs
           additional_permissions: |
             actions: read
