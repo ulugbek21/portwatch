@@ -1,6 +1,7 @@
 package checker
 
 import (
+	"context"
 	"errors"
 	"net"
 	"syscall"
@@ -15,7 +16,7 @@ func TestCheckTCP_Open(t *testing.T) {
 	}
 	defer func() { _ = ln.Close() }()
 
-	res := CheckTCP(ln.Addr().String(), time.Second)
+	res := CheckTCP(context.Background(), ln.Addr().String(), time.Second)
 
 	if !res.Open {
 		t.Errorf("expected Open=true, got false (err=%v)", res.Err)
@@ -38,7 +39,7 @@ func TestCheckTCP_Refused(t *testing.T) {
 		t.Fatalf("close: %v", err)
 	}
 
-	res := CheckTCP(addr, time.Second)
+	res := CheckTCP(context.Background(), addr, time.Second)
 	if res.Open {
 		t.Errorf("expected Open=false, got true (err=%v)", res.Err)
 	}
@@ -49,13 +50,32 @@ func TestCheckTCP_Refused(t *testing.T) {
 
 func TestCheckTCP_Timeout(t *testing.T) {
 	// TEST-NET-1 (RFC 5737) — reserved, non-routable. Dials here hang until timeout.
-	res := CheckTCP("192.0.2.1:80", 50*time.Millisecond)
+	res := CheckTCP(context.Background(), "192.0.2.1:80", 50*time.Millisecond)
 
 	if res.Open {
 		t.Fatalf("expected Open=false, got true")
 	}
 	if got := Classify(res.Err); got != "timeout" {
 		t.Errorf("Classify = %q, want %q (err=%v)", got, "timeout", res.Err)
+	}
+}
+
+func TestCheckTCP_ContextCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	start := time.Now()
+	res := CheckTCP(ctx, "192.0.2.1:80", 10*time.Second)
+	elapsed := time.Since(start)
+
+	if res.Open {
+		t.Fatalf("expected Open=false, got true")
+	}
+	if got := Classify(res.Err); got != "canceled" {
+		t.Errorf("Classify = %q, want %q (err=%v)", got, "canceled", res.Err)
+	}
+	if elapsed > 100*time.Millisecond {
+		t.Errorf("expected fast return on cancel, took %v", elapsed)
 	}
 }
 
@@ -68,6 +88,7 @@ func TestClassify(t *testing.T) {
 		{"nil", nil, ""},
 		{"dns", &net.DNSError{Err: "no such host", Name: "nope.invalid"}, "dns"},
 		{"refused", syscall.ECONNREFUSED, "refused"},
+		{"canceled", context.Canceled, "canceled"},
 		{"wrapped refused", &net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}, "refused"},
 		{"other", errors.New("something else"), "other"},
 		{"timeout", fakeTimeoutErr{}, "timeout"},
