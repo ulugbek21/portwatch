@@ -1,6 +1,7 @@
 package checker
 
 import (
+	"context"
 	"errors"
 	"net"
 	"syscall"
@@ -14,13 +15,16 @@ type Result struct {
 	Err     error
 }
 
-// CheckTCP dials target ("host:port") with the given timeout.
+// CheckTCP dials target ("host:port") subject to ctx and a per-check timeout.
 // Latency reflects wall-clock elapsed time whether the dial succeeds or fails.
-func CheckTCP(target string, timeout time.Duration) Result {
-	start := time.Now()
-	dialer := net.Dialer{Timeout: timeout}
+func CheckTCP(ctx context.Context, target string, timeout time.Duration) Result {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
-	conn, err := dialer.Dial("tcp", target)
+	start := time.Now()
+	var dialer net.Dialer
+
+	conn, err := dialer.DialContext(ctx, "tcp", target)
 	elapsed := time.Since(start)
 
 	if err != nil {
@@ -41,6 +45,10 @@ func Classify(err error) string {
 	var netErr net.Error
 	if errors.As(err, &netErr) && netErr.Timeout() {
 		return "timeout"
+	}
+
+	if errors.Is(err, context.Canceled) {
+		return "canceled"
 	}
 
 	var dnsErr *net.DNSError

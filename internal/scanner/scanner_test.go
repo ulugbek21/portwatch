@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"context"
 	"net"
 	"testing"
 	"time"
@@ -35,7 +36,7 @@ func TestScan_AllOpen(t *testing.T) {
 	addrs, cleanup := listenN(t, 3)
 	defer cleanup()
 
-	results := Scan(addrs, 2, time.Second)
+	results := Scan(context.Background(), addrs, 2, time.Second)
 
 	if len(results) != len(addrs) {
 		t.Fatalf("got %d results, want %d", len(results), len(addrs))
@@ -69,7 +70,7 @@ func TestScan_MixedOpenAndRefused(t *testing.T) {
 	_ = ln.Close()
 
 	targets := append([]string{refusedAddr}, addrs...)
-	results := Scan(targets, 2, time.Second)
+	results := Scan(context.Background(), targets, 2, time.Second)
 
 	if len(results) != len(targets) {
 		t.Fatalf("got %d results, want %d", len(results), len(targets))
@@ -100,7 +101,7 @@ func TestScan_LargeFanout(t *testing.T) {
 	addrs, cleanup := listenN(t, n)
 	defer cleanup()
 
-	results := Scan(addrs, 8, time.Second)
+	results := Scan(context.Background(), addrs, 8, time.Second)
 
 	if len(results) != n {
 		t.Fatalf("got %d results, want %d", len(results), n)
@@ -122,7 +123,7 @@ func TestScan_ZeroTargets(t *testing.T) {
 	done := make(chan struct{})
 	var results []checker.Result
 	go func() {
-		results = Scan(nil, 4, time.Second)
+		results = Scan(context.Background(), nil, 4, time.Second)
 		close(done)
 	}()
 
@@ -134,5 +135,29 @@ func TestScan_ZeroTargets(t *testing.T) {
 
 	if len(results) != 0 {
 		t.Errorf("got %d results, want 0", len(results))
+	}
+}
+
+func TestScan_Cancellation(t *testing.T) {
+	targets := make([]string, 50)
+	for i := range targets {
+		targets[i] = "192.0.2.1:80"
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	results := Scan(ctx, targets, 4, 5*time.Second)
+	elapsed := time.Since(start)
+
+	if elapsed > time.Second {
+		t.Errorf("Scan did not stop promptly on cancel: took %v", elapsed)
+	}
+	if len(results) >= len(targets) {
+		t.Errorf("expected partial results on cancel, got %d of %d", len(results), len(targets))
 	}
 }

@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -8,11 +9,11 @@ import (
 )
 
 // Scan dials every target concurrently using a pool of `workers` goroutines.
-// Each check uses the provided timeout. Returns results in completion order,
-// not input order (M6 sorts for presentation).
+// Each check uses the provided per-check timeout. Returns results in completion
+// order. If ctx is cancelled, Scan returns promptly with partial results.
 //
 // If workers < 1, it's coerced to 1.
-func Scan(targets []string, workers int, timeout time.Duration) []checker.Result {
+func Scan(ctx context.Context, targets []string, workers int, timeout time.Duration) []checker.Result {
 	if workers < 1 {
 		workers = 1
 	}
@@ -25,18 +26,35 @@ func Scan(targets []string, workers int, timeout time.Duration) []checker.Result
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for target := range jobs {
-				results <- checker.CheckTCP(target, timeout)
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case target, ok := <-jobs:
+					if !ok {
+						return
+					}
+					res := checker.CheckTCP(ctx, target, timeout)
+					select {
+					case <-ctx.Done():
+						return
+					case results <- res:
+					}
+				}
 			}
 		}()
 	}
 
-	// Producer: owns `jobs`, closes it when the input is exhausted.
+	// Producer: owns `jobs`, closes it on exhaustion or cancellation.
 	go func() {
+		defer close(jobs)
 		for _, t := range targets {
-			jobs <- t
+			select {
+			case <-ctx.Done():
+				return
+			case jobs <- t:
+			}
 		}
-		close(jobs)
 	}()
 
 	// Fan-in closer: results is written by N workers, so no single worker
